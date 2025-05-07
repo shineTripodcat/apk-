@@ -62,7 +62,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
           FEEDNAME: packages_ci
-          PACKAGES: lucky luci-app-lucky
+          PACKAGES: nikki luci-app-nikki
           NO_REFRESH_CHECK: true
           V: s
 
