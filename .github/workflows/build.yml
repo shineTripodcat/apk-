@@ -1,4 +1,4 @@
-name: Build-OpenWrt-nikki
+name: Build-OpenWrt-diskman
 
 on:
   workflow_dispatch:
@@ -62,20 +62,20 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
           FEEDNAME: packages_ci
-          PACKAGES: nikki luci-app-nikki
+          PACKAGES: diskman luci-app-diskman
           NO_REFRESH_CHECK: true
           V: s
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nikki-${{ matrix.arch }}-${{ matrix.sdk }}
+          name: diskman-${{ matrix.arch }}-${{ matrix.sdk }}
           path: bin/packages/${{ matrix.arch }}/packages_ci/
 
       - name: Create compress files
         run: |
-          #tar -zcvf nikki-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
-          zip -j nikki-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
+          #tar -zcvf diskman-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
+          zip -j diskman-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
 
       - name: Release
         if: ${{ github.event.inputs.tag != '' }}
@@ -87,10 +87,10 @@ jobs:
              - 其中 **`openwrt-22.03`** 里面是ipk安装包 **`SNAPSHOT`** 里面是apk安装包
 
              - **`*.apk` 是OpenWrt新版的APK包** 对于apk包跳过证书命令
-             `apk add --allow-untrusted luci-app-nikki.apk`
+             `apk add --allow-untrusted luci-app-diskman.apk`
 
              ${{ github.event.inputs.text }}
            
             tag_name: ${{ env.TAG }}
-            files: nikki-${{ matrix.arch }}-${{ matrix.sdk }}.zip
+            files: diskman-${{ matrix.arch }}-${{ matrix.sdk }}.zip
  
