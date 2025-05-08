@@ -1,0 +1,64 @@
+name: Build-OpenWrt-diskman-APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布版本号 (留空不发布)'
+        required: false
+        default: ''
+      text:
+        description: '发布说明'
+        required: false
+        default: ''
+env:
+  TAG: "${{ github.event.inputs.tag }}"
+  TZ: Asia/Shanghai
+permissions:
+  contents: write
+jobs:
+  build:
+    name: Build APK-${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [aarch64_cortex-a53]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Building APK packages
+        uses: sbwml/openwrt-gh-action-sdk@main
+        env:
+          ARCH: ${{ matrix.arch }}  # 架构名称
+          SDK: SNAPSHOT             # 固定使用 SNAPSHOT SDK
+          FEEDNAME: packages_ci
+          PACKAGES: diskman luci-app-diskman
+          V: s
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: diskman-${{ matrix.arch }}-apk
+          path: bin/targets/*/packages/*.apk
+
+      - name: Create compress files
+        run: |
+          cd bin/targets/*/packages
+          zip -r ../../../../diskman-${{ matrix.arch }}-apk.zip *.apk
+          cd ../../../..
+
+      - name: Release
+        if: ${{ github.event.inputs.tag != '' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          body: |
+            APK 安装说明：
+            ```bash
+            apk add --allow-untrusted luci-app-diskman.apk
+            ```
+            ${{ github.event.inputs.text }}
+          files: |
+            diskman-*-apk.zip
