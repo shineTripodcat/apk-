@@ -19,7 +19,7 @@ permissions:
 jobs:
   build:
     name: Build APK-${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -27,35 +27,44 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: 'package/packages_ci'  # 关键路径修正
+
+      - name: Setup OpenWrt feeds
+        run: |
+          # 初始化自定义 feed
+          echo 'src-link packages_ci $GITHUB_WORKSPACE/package/packages_ci' >> feeds.conf
+          
+          # 更新所有 feeds
+          ./scripts/feeds update -a
+          
+          # 安装依赖
+          ./scripts/feeds install -a
 
       - name: Building APK packages
-        uses: sbwml/openwrt-gh-action-sdk@main
+        uses: sbwml/openwrt-gh-action-sdk@v2.0.0
         env:
-          ARCH: ${{ matrix.arch }}  # 架构名称
-          SDK: SNAPSHOT             # 固定使用 SNAPSHOT SDK
-          FEEDNAME: packages_ci
-          PACKAGES: diskman luci-app-diskman
-          V: s
+          TARGET: qualcommax/ipq807x  # 明确指定目标平台
+          SDK: SNAPSHOT
+          FEEDS_CONF: feeds.conf       # 显式指定配置文件
+          PACKAGES: luci-app-diskman   # 仅编译主应用
+          VERBOSE: 1                   # 显示详细日志
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: diskman-${{ matrix.arch }}-apk
-          path: bin/targets/*/packages/*.apk
-
-      - name: Create compress files
+      - name: Find and upload artifacts
         run: |
-          cd bin/targets/*/packages
-          zip -r ../../../../diskman-${{ matrix.arch }}-apk.zip *.apk
-          cd ../../../..
+          # 查找生成的 APK 文件
+          find bin/ -name '*.apk' -exec echo "Found APK: {}" \;
+          
+          # 创建压缩包 (保留目录结构)
+          find bin/ -name '*.apk' -print0 | xargs -0 zip -9r diskman-${{ matrix.arch }}-apk.zip
 
-      - name: Release
+      - name: Release Assets
         if: ${{ github.event.inputs.tag != '' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
           body: |
-            APK 安装说明：
+            ### APK 安装指南
             ```bash
             apk add --allow-untrusted luci-app-diskman.apk
             ```
