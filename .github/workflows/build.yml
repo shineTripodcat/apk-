@@ -56,9 +56,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Copy custom packages
-        run: |
-          cp -r package/packages_ci/luci-app-dockerman package/packages_ci/luci-lib-docker ${{ env.OPENWRT_SDK_PATH }}/package/
+#      - name: Copy custom packages
+#        run: |
+  #        cp -r package/packages_ci/luci-app-dockerman package/packages_ci/luci-lib-docker ${{ env.OPENWRT_SDK_PATH }}/package/
           
       - name: Building packages
         uses: sbwml/openwrt-gh-action-sdk@main
