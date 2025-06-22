@@ -42,7 +42,7 @@ jobs:
  #           - x86_64
 
         sdk:
-          - openwrt-21.02
+          - SNAPSHOT
           - openwrt-22.03
     steps:
       - uses: actions/checkout@main
