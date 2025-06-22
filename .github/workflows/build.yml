@@ -1,6 +1,7 @@
-name: Build-OpenWrt-dockerman
+name: Build-OpenWrt-netspeedtest
 
 on:
+  push:
   workflow_dispatch:
     inputs:
       tag:
@@ -11,6 +12,9 @@ on:
         description: '请填写发布的说明'
         required: false
         default: ''
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 env:
   TAG: "${{ github.event.inputs.tag }}"
   TZ: Asia/Shanghai
@@ -25,29 +29,29 @@ jobs:
       matrix:
         arch:
           - aarch64_cortex-a53
-#          - aarch64_cortex-a72
-#          - aarch64_generic
-#          - arm_arm1176jzf-s_vfp
-#          - arm_arm926ej-s
-#          - arm_cortex-a15_neon-vfpv4
-#          - arm_cortex-a5_vfpv4
-#          - arm_cortex-a7
-#          - arm_cortex-a7_neon-vfpv4
-#          - arm_cortex-a8_vfpv3
-#          - arm_cortex-a9
-#          - arm_cortex-a9_neon
-#          - arm_cortex-a9_vfpv3-d16
-#          - arm_fa526
-#          - arm_mpcore
-#          - arm_xscale
-#          - mips_24kc
-#          - mips_4kec
-#          - mips_mips32
-#          - mipsel_24kc
-#          - mipsel_24kc_24kf
-#          - mipsel_74kc
-#          - mipsel_mips32
-#          - x86_64
+          - aarch64_cortex-a72
+          - aarch64_generic
+          - arm_arm1176jzf-s_vfp
+          - arm_arm926ej-s
+          - arm_cortex-a15_neon-vfpv4
+          - arm_cortex-a5_vfpv4
+          - arm_cortex-a7
+          - arm_cortex-a7_neon-vfpv4
+          - arm_cortex-a8_vfpv3
+          - arm_cortex-a9
+          - arm_cortex-a9_neon
+          - arm_cortex-a9_vfpv3-d16
+          - arm_fa526
+          - arm_mpcore
+          - arm_xscale
+          - mips_24kc
+          - mips_4kec
+          - mips_mips32
+          - mipsel_24kc
+          - mipsel_24kc_24kf
+          - mipsel_74kc
+          - mipsel_mips32
+          - x86_64
         sdk:
           - openwrt-22.03
           - SNAPSHOT
@@ -56,29 +60,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-#      - name: Copy custom packages
-#        run: |
-  #        cp -r package/packages_ci/luci-app-dockerman package/packages_ci/luci-lib-docker ${{ env.OPENWRT_SDK_PATH }}/package/
-          
+
       - name: Building packages
         uses: sbwml/openwrt-gh-action-sdk@main
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
           FEEDNAME: packages_ci
-          PACKAGES: luci-app-dockerman luci-lib-docker
+          PACKAGES: netspeedtest luci-app-netspeedtest
           NO_REFRESH_CHECK: true
           V: s
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dockerman-${{ matrix.arch }}-${{ matrix.sdk }}
+          name: netspeedtest-${{ matrix.arch }}-${{ matrix.sdk }}
           path: bin/packages/${{ matrix.arch }}/packages_ci/
 
       - name: Create compress files
         run: |
-          #tar -zcvf dockerman-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
-          zip -j dockerman-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
+          #tar -zcvf netspeedtest-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
+          zip -j netspeedtest-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
 
       - name: Release
         if: ${{ github.event.inputs.tag != '' }}
@@ -90,10 +91,10 @@ jobs:
              - 其中 **`openwrt-22.03`** 里面是ipk安装包 **`SNAPSHOT`** 里面是apk安装包
 
              - **`*.apk` 是OpenWrt新版的APK包** 对于apk包跳过证书命令
-             `apk add --allow-untrusted luci-app-dockerman.apk`
+             `apk add --allow-untrusted luci-app-netspeedtest.apk`
 
              ${{ github.event.inputs.text }}
            
             tag_name: ${{ env.TAG }}
-            files: dockerman-${{ matrix.arch }}-${{ matrix.sdk }}.zip
+            files: netspeedtest-${{ matrix.arch }}-${{ matrix.sdk }}.zip
  
