@@ -1,4 +1,4 @@
-name: Build-OpenWrt-lucky
+name: Build-OpenWrt-oaf
 
 on:
   push:
@@ -66,20 +66,20 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
           FEEDNAME: packages_ci
-          PACKAGES: lucky luci-app-lucky
+          PACKAGES: oaf open-app-filter luci-app-oaf
           NO_REFRESH_CHECK: true
           V: s
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: lucky-${{ matrix.arch }}-${{ matrix.sdk }}
+          name: oaf-${{ matrix.arch }}-${{ matrix.sdk }}
           path: bin/packages/${{ matrix.arch }}/packages_ci/
 
       - name: Create compress files
         run: |
-          #tar -zcvf lucky-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
-          zip -j lucky-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
+          #tar -zcvf oaf-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
+          zip -j oaf-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
 
       - name: Release
         if: ${{ github.event.inputs.tag != '' }}
@@ -91,10 +91,10 @@ jobs:
              - 其中 **`openwrt-22.03`** 里面是ipk安装包 **`SNAPSHOT`** 里面是apk安装包
 
              - **`*.apk` 是OpenWrt新版的APK包** 对于apk包跳过证书命令
-             `apk add --allow-untrusted luci-app-lucky.apk`
+             `apk add --allow-untrusted luci-app-oaf.apk`
 
              ${{ github.event.inputs.text }}
            
             tag_name: ${{ env.TAG }}
-            files: lucky-${{ matrix.arch }}-${{ matrix.sdk }}.zip
+            files: oaf-${{ matrix.arch }}-${{ matrix.sdk }}.zip
  
