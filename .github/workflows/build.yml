@@ -1,4 +1,4 @@
-name: Build-OpenWrt-oaf
+name: Build-OpenWrt-eqosplus
 
 on:
   push:
@@ -53,7 +53,7 @@ jobs:
   #        - mipsel_mips32
   #        - x86_64
         sdk:
-          - openwrt-21.02
+          - openwrt-24.10
           - SNAPSHOT
 
     steps:
@@ -66,20 +66,20 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
           FEEDNAME: packages_ci
-          PACKAGES: oaf open-app-filter luci-app-oaf
+          PACKAGES: luci-app-eqosplus
           NO_REFRESH_CHECK: true
           V: s
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: oaf-${{ matrix.arch }}-${{ matrix.sdk }}
+          name: eqosplus-${{ matrix.arch }}-${{ matrix.sdk }}
           path: bin/packages/${{ matrix.arch }}/packages_ci/
 
       - name: Create compress files
         run: |
-          #tar -zcvf oaf-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
-          zip -j oaf-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
+          #tar -zcvf eqosplus-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
+          zip -j eqosplus-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
 
       - name: Release
         if: ${{ github.event.inputs.tag != '' }}
@@ -88,13 +88,13 @@ jobs:
             token: ${{ secrets.GITHUB_TOKEN }}
             body: |
 
-             - 其中 **`openwrt-22.03`** 里面是ipk安装包 **`SNAPSHOT`** 里面是apk安装包
+             - 其中 **`openwrt-24.10`** 里面是ipk安装包 **`SNAPSHOT`** 里面是apk安装包
 
              - **`*.apk` 是OpenWrt新版的APK包** 对于apk包跳过证书命令
-             `apk add --allow-untrusted luci-app-oaf.apk`
+             `apk add --allow-untrusted luci-app-eqosplus.apk`
 
              ${{ github.event.inputs.text }}
            
             tag_name: ${{ env.TAG }}
-            files: oaf-${{ matrix.arch }}-${{ matrix.sdk }}.zip
+            files: eqosplus-${{ matrix.arch }}-${{ matrix.sdk }}.zip
  
