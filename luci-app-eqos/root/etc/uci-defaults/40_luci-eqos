@@ -1,5 +1,9 @@
 #!/bin/sh
 
+# Set correct permissions for init script
+chmod +x /etc/init.d/eqos
+chmod +x /usr/sbin/eqos
+
 uci -q batch <<-EOF >/dev/null
 	delete ucitrack.@eqos[-1]
 	add ucitrack eqos
