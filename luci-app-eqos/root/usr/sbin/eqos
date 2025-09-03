@@ -1,0 +1,399 @@
+#!/bin/sh
+
+dev=br-lan
+
+# Function to get MAC address for a given IP
+get_mac_for_ip() {
+	local ip="$1"
+	local mac=""
+	
+	# Method 1: Try ip neigh show
+	mac=$(ip neigh show "$ip" 2>/dev/null | awk '{print $5}' | head -1)
+	if [ -n "$mac" ] && [ "$mac" != "FAILED" ]; then
+		echo "$mac"
+		return 0
+	fi
+	
+	# Method 2: Try arp command
+	mac=$(arp -n "$ip" 2>/dev/null | awk '{print $3}' | head -1)
+	if [ -n "$mac" ] && [ "$mac" != "(incomplete)" ]; then
+		echo "$mac"
+		return 0
+	fi
+	
+	# Method 3: Parse /proc/net/arp
+	mac=$(awk -v ip="$ip" '$1 == ip {print $4}' /proc/net/arp 2>/dev/null | head -1)
+	if [ -n "$mac" ] && [ "$mac" != "00:00:00:00:00:00" ]; then
+		echo "$mac"
+		return 0
+	fi
+	
+	return 1
+}
+
+# Function to get IPv4 address for a given MAC
+get_ipv4_for_mac() {
+	local mac="$1"
+	local ip=""
+	
+	# Method 1: Try ip neigh show
+	ip=$(ip neigh show 2>/dev/null | grep -i "$mac" | awk '{print $1}' | head -1)
+	if [ -n "$ip" ]; then
+		echo "$ip"
+		return 0
+	fi
+	
+	# Method 2: Parse /proc/net/arp
+	ip=$(awk -v mac="$mac" 'tolower($4) == tolower(mac) {print $1}' /proc/net/arp 2>/dev/null | head -1)
+	if [ -n "$ip" ]; then
+		echo "$ip"
+		return 0
+	fi
+	
+	return 1
+}
+
+stop_qos() {
+	tc qdisc del dev $dev root 2>/dev/null
+	tc qdisc del dev $dev ingress 2>/dev/null
+	tc qdisc del dev ${dev}-ifb root 2>/dev/null
+	ip link del dev ${dev}-ifb 2>/dev/null
+	
+	# Clear IPv6 iptables rules
+	ip6tables -t mangle -F EQOS_OUT 2>/dev/null
+	ip6tables -t mangle -F EQOS_IN 2>/dev/null
+	ip6tables -t mangle -X EQOS_OUT 2>/dev/null
+	ip6tables -t mangle -X EQOS_IN 2>/dev/null
+	
+	# Clear ebtables rules (Method 3A cleanup)
+	if command -v ebtables >/dev/null 2>&1; then
+		ebtables -F FORWARD 2>/dev/null
+	fi
+	
+	# Clean up temporary files
+	rm -f /tmp/eqos_mac_marks.txt
+}
+
+start_qos() {
+	local dl=$1
+	local up=$2
+	
+	# Validate parameters
+	if [ -z "$dl" ] || [ -z "$up" ] || [ "$dl" -eq 0 ] || [ "$up" -eq 0 ]; then
+		echo "Error: Invalid bandwidth parameters (dl=$dl, up=$up)"
+		return 1
+	fi
+	
+	# Check if device exists
+	if ! ip link show "$dev" >/dev/null 2>&1; then
+		echo "Error: Network device $dev not found"
+		return 1
+	fi
+	
+	# Setup egress (download) limiting with error handling
+	if ! tc qdisc add dev $dev root handle 1: htb 2>/dev/null; then
+		echo "Warning: Failed to add root qdisc, may already exist"
+	fi
+	
+	if ! tc class add dev $dev parent 1: classid 1:1 htb rate ${dl}mbit 2>/dev/null; then
+		echo "Error: Failed to add root class for download limiting"
+		return 1
+	fi
+	
+	# Setup IFB device for ingress (upload) limiting
+	if ! ip link add dev ${dev}-ifb name ${dev}-ifb type ifb 2>/dev/null; then
+		echo "Warning: IFB device may already exist"
+	fi
+	
+	if ! ip link set dev ${dev}-ifb up 2>/dev/null; then
+		echo "Error: Failed to bring up IFB device"
+		return 1
+	fi
+	
+	if ! tc qdisc add dev ${dev}-ifb root handle 1: htb 2>/dev/null; then
+		echo "Warning: Failed to add IFB root qdisc, may already exist"
+	fi
+	
+	if ! tc class add dev ${dev}-ifb parent 1: classid 1:1 htb rate ${up}mbit 2>/dev/null; then
+		echo "Error: Failed to add root class for upload limiting"
+		return 1
+	fi
+	
+	# Setup ingress redirection
+	if ! tc qdisc add dev $dev ingress 2>/dev/null; then
+		echo "Warning: Ingress qdisc may already exist"
+	fi
+	
+	# Add redirection filters with error handling
+	tc filter add dev $dev parent ffff: protocol ip u32 match u32 0 0 at 0 flowid 1:1 action mirred egress redirect dev ${dev}-ifb 2>/dev/null || {
+		echo "Warning: Failed to add IPv4 redirection filter"
+	}
+	tc filter add dev $dev parent ffff: protocol ipv6 u32 match u32 0 0 at 0 flowid 1:1 action mirred egress redirect dev ${dev}-ifb 2>/dev/null || {
+		echo "Warning: Failed to add IPv6 redirection filter"
+	}
+	
+	# Initialize IPv6 iptables chains with error handling
+	if command -v ip6tables >/dev/null 2>&1; then
+		ip6tables -t mangle -N EQOS_OUT 2>/dev/null || echo "Warning: EQOS_OUT chain may already exist"
+		ip6tables -t mangle -N EQOS_IN 2>/dev/null || echo "Warning: EQOS_IN chain may already exist"
+		ip6tables -t mangle -I FORWARD -j EQOS_OUT 2>/dev/null || echo "Warning: Failed to insert EQOS_OUT rule"
+		ip6tables -t mangle -I FORWARD -j EQOS_IN 2>/dev/null || echo "Warning: Failed to insert EQOS_IN rule"
+	else
+		echo "Warning: ip6tables not available, IPv6 limiting may not work"
+	fi
+	
+	echo "EQoS started successfully: Download ${dl}Mbit/s, Upload ${up}Mbit/s"
+	return 0
+}
+
+case "$1" in
+	"stop")
+		echo "Stopping EQoS service..."
+		stop_qos
+		echo "EQoS service stopped successfully"
+	;;
+	"start")
+		echo "Starting EQoS service..."
+		
+		# Validate parameters
+		if [ -z "$2" ] || [ -z "$3" ]; then
+			echo "Error: Missing bandwidth parameters"
+			echo "Usage: $0 start <download_rate> <upload_rate>"
+			exit 1
+		fi
+		
+		# Stop existing QoS rules
+		stop_qos
+		
+		# Start QoS with error handling
+		if ! start_qos $2 $3; then
+			echo "Error: Failed to start QoS"
+			exit 1
+		fi
+		
+		echo "EQoS service started successfully"
+	;;
+	"add")
+		ip="$2"
+		dl="$3"
+		up="$4"
+		
+		# Validate parameters
+		if [ -z "$ip" ] || [ -z "$dl" ] || [ -z "$up" ]; then
+			echo "Error: Missing required parameters (ip=$ip, dl=$dl, up=$up)"
+			exit 1
+		fi
+		
+		# Validate IP address format
+		if ! echo "$ip" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+			echo "Error: Invalid IPv4 address format: $ip"
+			exit 1
+		fi
+		
+		# Validate bandwidth values
+		if [ "$dl" -le 0 ] || [ "$up" -le 0 ]; then
+			echo "Error: Bandwidth values must be positive (dl=$dl, up=$up)"
+			exit 1
+		fi
+		
+		cnt=$(tc class show dev $dev | wc -l)
+		
+		# Add download limiting class and filter with error handling
+		if ! tc class add dev $dev parent 1:1 classid 1:1$cnt htb rate ${dl}mbit ceil ${dl}mbit 2>/dev/null; then
+			echo "Error: Failed to add download class for $ip"
+			exit 1
+		fi
+		
+		if ! tc filter add dev $dev parent 1:0 protocol ip u32 match ip dst $ip flowid 1:1$cnt 2>/dev/null; then
+			echo "Error: Failed to add download filter for $ip"
+			tc class del dev $dev classid 1:1$cnt 2>/dev/null
+			exit 1
+		fi
+		
+		# Add upload limiting class and filter with error handling
+		if ! tc class add dev ${dev}-ifb parent 1:1 classid 1:1$cnt htb rate ${up}mbit ceil ${up}mbit 2>/dev/null; then
+			echo "Error: Failed to add upload class for $ip"
+			tc filter del dev $dev parent 1:0 protocol ip u32 match ip dst $ip 2>/dev/null
+			tc class del dev $dev classid 1:1$cnt 2>/dev/null
+			exit 1
+		fi
+		
+		if ! tc filter add dev ${dev}-ifb parent 1:0 protocol ip u32 match ip src $ip flowid 1:1$cnt 2>/dev/null; then
+			echo "Error: Failed to add upload filter for $ip"
+			tc filter del dev $dev parent 1:0 protocol ip u32 match ip dst $ip 2>/dev/null
+			tc class del dev $dev classid 1:1$cnt 2>/dev/null
+			tc class del dev ${dev}-ifb classid 1:1$cnt 2>/dev/null
+			exit 1
+		fi
+		
+		echo "Successfully added IP-based limiting for $ip: Download ${dl}Mbit/s, Upload ${up}Mbit/s"
+	;;
+	"add_ipv6")
+		mac="$2"
+		dl="$3"
+		up="$4"
+		
+		# Validate parameters
+		if [ -z "$mac" ] || [ -z "$dl" ] || [ -z "$up" ]; then
+			echo "Error: Missing required parameters (mac=$mac, dl=$dl, up=$up)"
+			exit 1
+		fi
+		
+		# Validate MAC address format
+		if ! echo "$mac" | grep -qiE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'; then
+			echo "Error: Invalid MAC address format: $mac"
+			exit 1
+		fi
+		
+		# Validate bandwidth values
+		if [ "$dl" -le 0 ] || [ "$up" -le 0 ]; then
+			echo "Error: Bandwidth values must be positive (dl=$dl, up=$up)"
+			exit 1
+		fi
+		
+		# Enhanced MAC-based comprehensive limiting (Method 3)
+		cnt=$(tc class show dev $dev | wc -l)
+		mark=$((0x1000 + cnt))
+		
+		# Create tc classes for this MAC with error handling
+		if ! tc class add dev $dev parent 1:1 classid 1:1$cnt htb rate ${dl}mbit ceil ${dl}mbit 2>/dev/null; then
+			echo "Error: Failed to add download class for MAC $mac"
+			exit 1
+		fi
+		
+		if ! tc class add dev ${dev}-ifb parent 1:1 classid 1:1$cnt htb rate ${up}mbit ceil ${up}mbit 2>/dev/null; then
+			echo "Error: Failed to add upload class for MAC $mac"
+			tc class del dev $dev classid 1:1$cnt 2>/dev/null
+			exit 1
+		fi
+		
+		# Create tc filters using fw classifier (requires iptables MARK) with error handling
+		# For IPv6 traffic marked by ip6tables
+		if ! tc filter add dev $dev parent 1:0 protocol ipv6 prio 1 handle $mark fw flowid 1:1$cnt 2>/dev/null; then
+			echo "Error: Failed to add IPv6 download filter for MAC $mac"
+			tc class del dev $dev classid 1:1$cnt 2>/dev/null
+			tc class del dev ${dev}-ifb classid 1:1$cnt 2>/dev/null
+			exit 1
+		fi
+		
+		if ! tc filter add dev ${dev}-ifb parent 1:0 protocol ipv6 prio 1 handle $mark fw flowid 1:1$cnt 2>/dev/null; then
+			echo "Error: Failed to add IPv6 upload filter for MAC $mac"
+			tc filter del dev $dev parent 1:0 protocol ipv6 prio 1 handle $mark fw 2>/dev/null
+			tc class del dev $dev classid 1:1$cnt 2>/dev/null
+			tc class del dev ${dev}-ifb classid 1:1$cnt 2>/dev/null
+			exit 1
+		fi
+		
+		# Also add IPv4 filters for the same MAC (comprehensive coverage)
+		if ! tc filter add dev $dev parent 1:0 protocol ip prio 1 handle $mark fw flowid 1:1$cnt 2>/dev/null; then
+			echo "Warning: Failed to add IPv4 download filter for MAC $mac"
+		fi
+		
+		if ! tc filter add dev ${dev}-ifb parent 1:0 protocol ip prio 1 handle $mark fw flowid 1:1$cnt 2>/dev/null; then
+			echo "Warning: Failed to add IPv4 upload filter for MAC $mac"
+		fi
+		
+		# Method 3A: Use ebtables for MAC-level control (if available)
+		if command -v ebtables >/dev/null 2>&1; then
+			if ! ebtables -A FORWARD -s $mac -j mark --set-mark $mark 2>/dev/null; then
+				echo "Warning: Failed to add ebtables source rule for MAC $mac"
+			fi
+			if ! ebtables -A FORWARD -d $mac -j mark --set-mark $mark 2>/dev/null; then
+				echo "Warning: Failed to add ebtables destination rule for MAC $mac"
+			fi
+		else
+			echo "Warning: ebtables not available, MAC-level control may be limited"
+		fi
+		
+		# Method 3B: Get all current IPv6 addresses for the MAC (including fe80)
+		# Improved IPv6 address discovery with better parsing
+		global_ipv6s=$(ip -6 neigh show 2>/dev/null | grep -i "$mac" | grep -o '[0-9a-fA-F:]*:[0-9a-fA-F:]*' | grep -v "^fe80" | sort -u)
+		local_ipv6s=$(ip -6 neigh show 2>/dev/null | grep -i "$mac" | grep -o 'fe80:[0-9a-fA-F:]*' | sort -u)
+		
+		# Add ip6tables rules for all global IPv6 addresses
+		for ipv6 in $global_ipv6s; do
+			[ -n "$ipv6" ] && {
+				ip6tables -t mangle -A EQOS_OUT -d "$ipv6/128" -j MARK --set-mark $mark 2>/dev/null
+				ip6tables -t mangle -A EQOS_IN -s "$ipv6/128" -j MARK --set-mark $mark 2>/dev/null
+			}
+		done
+		
+		# Add ip6tables rules for link-local addresses (fe80::)
+		# Note: fe80 addresses are used for local network communication
+		for ipv6 in $local_ipv6s; do
+			[ -n "$ipv6" ] && {
+				ip6tables -t mangle -A EQOS_OUT -d "$ipv6/128" -j MARK --set-mark $mark 2>/dev/null
+				ip6tables -t mangle -A EQOS_IN -s "$ipv6/128" -j MARK --set-mark $mark 2>/dev/null
+			}
+		done
+		
+		# Method 3C: Add wildcard rule for future IPv6 addresses from this MAC
+		# Use ip6tables with MAC matching (requires ip6t_mac module)
+		if lsmod | grep -q ip6t_mac; then
+			ip6tables -t mangle -A EQOS_OUT -m mac --mac-source $mac -j MARK --set-mark $mark 2>/dev/null
+			ip6tables -t mangle -A EQOS_IN -m mac --mac-source $mac -j MARK --set-mark $mark 2>/dev/null
+		fi
+		
+		# Store MAC-mark mapping for dynamic updates
+		echo "$mac:$mark" >> /tmp/eqos_mac_marks.txt
+	;;
+	"update_ipv6")
+		# Dynamic update function for IPv6 addresses
+		if [ ! -f /tmp/eqos_mac_marks.txt ]; then
+			echo "No MAC-mark mappings found. Run add_ipv6 first."
+			exit 1
+		fi
+		
+		while IFS=':' read -r mac mark; do
+			[ -z "$mac" ] || [ -z "$mark" ] && continue
+			
+			# Get current IPv6 addresses for this MAC (all types)
+			global_ipv6s=$(ip -6 neigh show 2>/dev/null | grep -i "$mac" | grep -o '[0-9a-fA-F:]*:[0-9a-fA-F:]*' | grep -v "^fe80" | sort -u)
+			local_ipv6s=$(ip -6 neigh show 2>/dev/null | grep -i "$mac" | grep -o 'fe80:[0-9a-fA-F:]*' | sort -u)
+			
+			# Remove old rules for this mark (safer method)
+			# Get list of existing rules with this mark and remove them specifically
+			ip6tables -t mangle -L EQOS_OUT --line-numbers -n 2>/dev/null | grep "MARK set $mark" | awk '{print $1}' | sort -rn | while read line_num; do
+				[ -n "$line_num" ] && ip6tables -t mangle -D EQOS_OUT $line_num 2>/dev/null
+			done
+			ip6tables -t mangle -L EQOS_IN --line-numbers -n 2>/dev/null | grep "MARK set $mark" | awk '{print $1}' | sort -rn | while read line_num; do
+				[ -n "$line_num" ] && ip6tables -t mangle -D EQOS_IN $line_num 2>/dev/null
+			done
+			
+			# Add new rules for all current IPv6 addresses (global + link-local)
+			for ipv6 in $global_ipv6s $local_ipv6s; do
+				[ -n "$ipv6" ] && {
+					ip6tables -t mangle -A EQOS_OUT -d "$ipv6/128" -j MARK --set-mark $mark 2>/dev/null
+					ip6tables -t mangle -A EQOS_IN -s "$ipv6/128" -j MARK --set-mark $mark 2>/dev/null
+				}
+			done
+			
+			echo "Updated IPv6 rules for MAC $mac (mark $mark):"
+			echo "  Global addresses: $global_ipv6s"
+			echo "  Link-local addresses: $local_ipv6s"
+		done < /tmp/eqos_mac_marks.txt
+	;;
+	*)
+		echo "Usage: $0 <command> [options]"
+		echo "Commands:"
+		echo "  start dl_rate up_rate       #Total bandwidth (Mbit/s)"
+		echo "  stop"
+		echo "  add ip dl_rate up_rate      #Limiting the bandwidth of a single IP (Mbit/s)"
+		echo "  add_ipv6 mac dl_rate up_rate #MAC-based comprehensive IPv6 limiting (Method 3)"
+		echo "  update_ipv6                 #Update IPv6 rules for all registered MACs"
+		echo "Example:"
+		echo "  $0 start 30 20              # Total bandwidth: down 30Mbit/s up 20Mbit/s"
+		echo "  $0 add 192.168.22.12 10 2   # down 10Mbit/s  up 2Mbit/s"
+		echo "  $0 add_ipv6 aa:bb:cc:dd:ee:ff 10 2   # MAC-based IPv6 limiting (all addresses)"
+		echo "  $0 update_ipv6              # Refresh IPv6 rules for dynamic addresses"
+		echo "Method 3 Features:"
+		echo "  - ebtables MAC-level control (if available)"
+		echo "  - ip6tables rules for ALL IPv6 address types:"
+		echo "    * Global unicast addresses (2409:8a70:xxx, etc.)"
+		echo "    * Link-local addresses (fe80::xxx)"
+		echo "    * Temporary privacy addresses"
+		echo "  - MAC-based wildcard matching (if ip6t_mac module loaded)"
+		echo "  - Dynamic IPv6 address updates every 5 minutes"
+		echo "  - Comprehensive coverage: no IPv6 address can bypass limiting"
+	;;
+esac

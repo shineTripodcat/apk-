@@ -1,0 +1,5 @@
+# EQoS IPv6 Dynamic Update Cron Job
+# Updates IPv6 rules every 5 minutes to handle dynamic IPv6 addresses
+# This ensures that devices with changing IPv6 addresses remain speed-limited
+
+*/5 * * * * /usr/sbin/eqos update_ipv6 >/dev/null 2>&1

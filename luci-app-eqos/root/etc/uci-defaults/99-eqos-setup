@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# EQoS Method 3 Setup Script
+# This script sets up the enhanced MAC-based IPv6 limiting functionality
+
+echo "Setting up EQoS Method 3 (MAC-based comprehensive limiting)..."
+
+# Install the IPv6 update cron job
+if [ -f /etc/crontabs/eqos_ipv6_update ]; then
+    cat /etc/crontabs/eqos_ipv6_update >> /etc/crontabs/root
+    echo "IPv6 dynamic update cron job installed."
+fi
+
+# Check for required kernel modules
+echo "Checking kernel module availability:"
+
+# Check for ip6t_mac module
+if lsmod | grep -q ip6t_mac || modprobe ip6t_mac 2>/dev/null; then
+    echo "✓ ip6t_mac module available - MAC-based IPv6 filtering enabled"
+else
+    echo "⚠ ip6t_mac module not available - using IP-based filtering only"
+fi
+
+# Check for ebtables
+if command -v ebtables >/dev/null 2>&1; then
+    echo "✓ ebtables available - Layer 2 MAC filtering enabled"
+else
+    echo "⚠ ebtables not available - using Layer 3 filtering only"
+fi
+
+# Create initial empty MAC-mark mapping file
+touch /tmp/eqos_mac_marks.txt
+
+# Restart cron service to load new job
+/etc/init.d/cron restart
+
+echo "EQoS Method 3 setup completed!"
+echo "Usage: /usr/sbin/eqos add_ipv6 <MAC> <download_mbps> <upload_mbps>"
+echo "Example: /usr/sbin/eqos add_ipv6 aa:bb:cc:dd:ee:ff 10 2"
+
+# Clean up this script after first run
+rm -f /etc/uci-defaults/99-eqos-setup
+
+exit 0

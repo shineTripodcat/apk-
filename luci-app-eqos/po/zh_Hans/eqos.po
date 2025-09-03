@@ -1,0 +1,70 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: LuCi Chinese Translation\n"
+"Report-Msgid-Bugs-To: \n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Pootle 2.0.6\n"
+
+msgid "EQoS"
+msgstr "IP限速"
+
+msgid "Comment"
+msgstr "注解"
+
+msgid "Download speed (Mbit/s)"
+msgstr "下载速度 (Mbit/s)"
+
+msgid "Enable"
+msgstr "开启"
+
+msgid "QoS"
+msgstr "QoS"
+
+msgid "Quality of Service"
+msgstr "IP限速"
+
+msgid "Upload speed (Mbit/s)"
+msgstr "上传速度 (Mbit/s)"
+
+msgid "Speed limit based on IP address"
+msgstr "IP限速"
+
+msgid "Total bandwidth"
+msgstr "总带宽"
+
+msgid "Enable IPv6 Support"
+msgstr "启用IPv6支持"
+
+msgid "Enable MAC-based Speed Limiting"
+msgstr "基于MAC地址限速"
+
+msgid "Apply speed limits to IPv6 addresses using MAC address identification"
+msgstr "使用MAC地址识别对IPv6地址应用限速规则"
+
+msgid "Apply comprehensive speed limits to all IP addresses (IPv4/IPv6) of a device using MAC address identification"
+msgstr "使用MAC地址识别对设备的所有IP地址(IPv4/IPv6)应用全面限速规则"
+
+msgid "Device Speed Limiting Rules"
+msgstr "设备限速规则"
+
+msgid "Limiting Mode"
+msgstr "限速模式"
+
+msgid "IP Address Mode"
+msgstr "IP地址模式"
+
+msgid "MAC Address Mode (Recommended)"
+msgstr "MAC地址模式（推荐）"
+
+msgid "IP Address"
+msgstr "IP地址"
+
+msgid "MAC Address"
+msgstr "MAC地址"
+
+msgid "Device Information"
+msgstr "设备信息"
