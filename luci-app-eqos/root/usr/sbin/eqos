@@ -7,6 +7,12 @@ stop_qos() {
 	tc qdisc del dev $dev ingress 2>/dev/null
 	tc qdisc del dev ${dev}-ifb root 2>/dev/null
 	ip link del dev ${dev}-ifb 2>/dev/null
+	
+	# Clear IPv6 iptables rules
+	ip6tables -t mangle -F EQOS_OUT 2>/dev/null
+	ip6tables -t mangle -F EQOS_IN 2>/dev/null
+	ip6tables -t mangle -X EQOS_OUT 2>/dev/null
+	ip6tables -t mangle -X EQOS_IN 2>/dev/null
 }
 
 start_qos() {
@@ -24,6 +30,13 @@ start_qos() {
 	
 	tc qdisc add dev $dev ingress
 	tc filter add dev $dev parent ffff: protocol ip u32 match u32 0 0 flowid 1:1 action mirred egress redirect dev ${dev}-ifb
+	tc filter add dev $dev parent ffff: protocol ipv6 u32 match u32 0 0 flowid 1:1 action mirred egress redirect dev ${dev}-ifb
+	
+	# Initialize IPv6 iptables chains
+	ip6tables -t mangle -N EQOS_OUT 2>/dev/null
+	ip6tables -t mangle -N EQOS_IN 2>/dev/null
+	ip6tables -t mangle -I FORWARD -j EQOS_OUT 2>/dev/null
+	ip6tables -t mangle -I FORWARD -j EQOS_IN 2>/dev/null
 }
 
 case "$1" in
@@ -57,12 +70,19 @@ case "$1" in
 		
 		for ipv6 in $ipv6_addrs; do
 			cnt=$(tc class show dev $dev | wc -l)
+			mark=$((0x1000 + cnt))
 			
+			# Create tc classes
 			tc class add dev $dev parent 1:1 classid 1:1$cnt htb rate ${dl}mbit ceil ${dl}mbit
-			tc filter add dev $dev parent 1:0 protocol ipv6 u32 match ip6 dst $ipv6/128 flowid 1:1$cnt
-			
 			tc class add dev ${dev}-ifb parent 1:1 classid 1:1$cnt htb rate ${up}mbit ceil ${up}mbit
-			tc filter add dev ${dev}-ifb parent 1:0 protocol ipv6 u32 match ip6 src $ipv6/128 flowid 1:1$cnt
+			
+			# Create tc filters using handle (MARK)
+			tc filter add dev $dev parent 1:0 protocol ipv6 handle $mark fw flowid 1:1$cnt
+			tc filter add dev ${dev}-ifb parent 1:0 protocol ipv6 handle $mark fw flowid 1:1$cnt
+			
+			# Create ip6tables rules to mark packets
+			ip6tables -t mangle -A EQOS_OUT -d $ipv6/128 -j MARK --set-mark $mark
+			ip6tables -t mangle -A EQOS_IN -s $ipv6/128 -j MARK --set-mark $mark
 		done
 	;;
 	*)
@@ -75,6 +95,7 @@ case "$1" in
 		echo "Example:"
 		echo "  $0 start 30 20              # Total bandwidth: down 30Mbit/s up 20Mbit/s"
 		echo "  $0 add 192.168.22.12 10 2   # down 10Mbit/s  up 2Mbit/s"
-		echo "  $0 add_ipv6 aa:bb:cc:dd:ee:ff 10 2   # IPv6 down 10Mbit/s  up 2Mbit/s"
+		echo "  $0 add_ipv6 aa:bb:cc:dd:ee:ff 10 2   # IPv6 down 10Mbit/s  up 2Mbit/s (uses ip6tables+tc)"
+		echo "Note: IPv6 limiting requires ip6tables and uses MARK-based traffic classification"
 	;;
 esac
